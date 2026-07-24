@@ -104,9 +104,13 @@ public class OrderService : IOrderService
         if (order.Status != OrderStatus.Pending && order.Status != OrderStatus.Confirmed)
             return ServiceResult<Order>.Fail($"狀態為 {order.Status} 的訂單不可取消");
 
+        // 先記住原狀態再改；否則下面用已被改成 Cancelled 的狀態判斷，
+        // 條件永遠為 false、庫存永遠不會回補。
+        var wasActive = order.Status is OrderStatus.Pending or OrderStatus.Confirmed;
+
         order.Status = OrderStatus.Cancelled;
 
-        if (order.Status == OrderStatus.Pending || order.Status == OrderStatus.Confirmed)
+        if (wasActive)
         {
             foreach (var item in order.Items)
             {
