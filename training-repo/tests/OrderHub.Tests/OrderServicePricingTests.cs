@@ -1,9 +1,30 @@
 using OrderHub.Core.Domain;
+using OrderHub.Core.Services;
 
 namespace OrderHub.Tests;
 
 public class OrderServicePricingTests
 {
+    [Fact]
+    public async Task CreateOrder_GoldCustomer_TotalIsOriginalPriceTimes0_9_NotDoubleDiscounted()
+    {
+        using var db = TestSetup.CreateContext();
+        var service = TestSetup.CreateOrderService(db);
+        var customer = TestSetup.AddCustomer(db, tier: CustomerTier.Gold);
+        var product = TestSetup.AddProduct(db, unitPrice: 1000m);
+
+        var result = await service.CreateOrderAsync(customer.Id, new[] { new NewOrderLine(product.Id, 1) });
+        Assert.True(result.Success);
+
+        var order = await service.GetOrderAsync(result.Value!.Id);
+
+        // 單價快照應存「原價」，折扣只在 CalculateTotal 打一次
+        Assert.Equal(1000m, order!.Items.Single().UnitPriceSnapshot);
+        // Gold 應付總額 = 原價 × 0.9，不是被打兩次折的 810
+        Assert.Equal(900m, service.CalculateTotal(order));
+    }
+
+
     [Theory]
     [InlineData(CustomerTier.Standard, 0)]
     [InlineData(CustomerTier.Silver, 0.05)]
