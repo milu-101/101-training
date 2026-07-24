@@ -52,3 +52,33 @@ subagents / skills：
 - [ ] 修完 bug 說「用 code-reviewer 審查變更」→ 委派唯讀 reviewer
 - [ ] 用 test-runner 跑測試 → 只回摘要
 - [ ] `/fix-bug <症狀>` → 啟動標準流程
+
+---
+
+## 練習 2 — 排查並修復 3 個 bug
+
+**日期**：2026-07-24
+
+### 三個 bug 與根因
+
+| # | 症狀 | 根因 | 修法 | 分支 |
+| --- | --- | --- | --- | --- |
+| 1 | 新訂單在列表第一頁找不到、最後一頁空白 | `OrderRepository.GetPagedAsync` 用 `Skip(page * pageSize)`，但 page 是 1-based，第一頁就多跳一整頁（off-by-one） | 改成 `Skip((page - 1) * pageSize)` | `fix/order-list-pagination` |
+| 2 | Gold 會員應付總額比手算少一截，Silver 正常 | 建單時只有 Gold 把折扣先打進 `UnitPriceSnapshot`，`CalculateTotal` 又再打一次 → Gold 折兩次 (0.81) | 移除建單的預打折，快照一律存原價，折扣統一由 `CalculateTotal` 打一次 | `fix/gold-double-discount` |
+| 3 | 取消訂單後庫存不回補、越退越少 | 先把 `order.Status` 設成 Cancelled，才用它判斷是否回補 → 條件恆為 false | 改狀態前先用 `wasActive` 記住原狀態，再據以回補 | `fix/cancel-restock` |
+
+> 每個 bug 一個獨立分支、一個 commit（含回歸測試），commit message 一律「症狀 → 根因 → 修法」。
+
+### 心得（第一次用 agent 修 bug 的觀察）
+
+- **三個 bug 都是「差一點」的經典錯誤**：off-by-one、重複套用同一段邏輯、狀態判斷的先後順序。程式碼看起來都很順、也會編譯過，根因都只在一兩行——但頁面上的症狀差很多。這說明「會動」不等於「對」。
+- **先重現、再定位、最後才動手**，比一看到就改快得多。三個根因其實都藏在既有測試「差一步」沒測到的地方：舊測試只驗了分頁的**總數**、取消後的**狀態**，卻沒驗「哪一筆在第一頁」「庫存有沒有加回來」。缺的斷言正好就是 bug 的藏身處。
+- **TDD 的紅燈很有價值**：每個 bug 都先寫一個會失敗的測試，確認它失敗的原因真的對應到客訴症狀，修完再轉綠。這樣才確定測試是真的驗到行為，而不是恆真斷言。
+- **既有測試是理解「正確設計」的線索**：bug 2 一開始會猶豫要改建單還是改 `CalculateTotal`，是既有的 `CalculateTotal_AppliesTierDiscountOnSubtotal`（Gold 1000→900）確立了「快照存原價、折扣只打一次」才是對的設計，才沒改錯方向。
+- **一 bug 一 commit / 一分支** 讓每個修改都能單獨回溯、單獨 review，message 用「症狀→根因→修法」之後，未來的人不用讀 diff 也知道當初在解什麼。
+- **agent 的產出一定要自己驗**：對照程式碼、跑 `dotnet test` 全綠（最終 30/29 綠）才算數，不能因為說明聽起來合理就相信。
+
+### 目前狀態
+
+- 三個修復分別在三個 `fix/*` 分支上、尚未合併回 `main`（保持隔離，待逐一 review / merge）。
+- 每個分支上 `dotnet test` 全綠。
