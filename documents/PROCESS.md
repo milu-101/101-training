@@ -25,15 +25,6 @@ Claude Code（VS Code 擴充），Opus 4.8。
 
 ### 3. AI 誤導我的地方，與我如何發現
 
-它出錯的時候不會自己講，都是我動手看才發現的。
-
-練習 2 寫心得，它直接寫進了 code 旁邊那個 PROCESS.md，不是這一份。應該是看到同名檔就寫了，沒多想。我剛好知道資料夾長怎樣，才發現放錯位置叫它搬回來。它對「東西該放哪」滿敢自己決定的，這種地方要顧著點。
-
-練習 3 build 冒出四個紅字，我第一眼以為 code 寫壞了。定下來把訊息看完，才發現是網站還開著、DLL 被鎖住複製不了，跟編譯根本沒關係，關掉網站再 build 就過。差點白忙一場去找不存在的錯。
-
-還有一次比較好笑。我驗 threshold=0 想確認錯誤訊息有沒有出來，用 grep 找那句中文，找不到，還以為驗證沒生效。後來才想到中文在 HTML 裡被轉成 &#x 那種編碼，用 curl 看原始碼一看，訊息其實一直都在。
-
-（還有這一份心得檔，它一度被分支切換弄不見——因為之前把它設成 gitignore，切分支時工作區檔案被蓋掉。後來把 gitignore 那行拿掉、重新納入追蹤才穩住。）
 
 ### 4. 我會帶回日常工作的一招
 
@@ -59,10 +50,10 @@ Claude Code（VS Code 擴充），Opus 4.8。
 練習 2
 
 1. ⚠️ 老實說這次我是先讀 code + 寫測試來重現，沒真的去點頁面（下次三個都該先在瀏覽器重現一遍）
-2. [x] 我給的是具體現象（第一頁找不到新單、Gold 少一截、退單後庫存不回補），不是只貼客訴
+2. ✅ 我給的是具體現象（第一頁找不到新單、Gold 少一截、退單後庫存不回補），不是只貼客訴
 3. ⚠️ 用測試轉綠代替了頁面實測，UI 沒逐一點過
-4. [x] 每個 bug 都補了回歸測試，`dotnet test` 全綠（最後含新功能一共 35 個）
-5. [x] 三個獨立分支、三個獨立 commit，訊息都寫了症狀與根因
+4. ✅ 每個 bug 都補了回歸測試，`dotnet test` 全綠（最後含新功能一共 35 個）
+5. ✅ 三個獨立分支、三個獨立 commit，訊息都寫了症狀與根因
 6. 為什麼原本的測試沒抓到這三個 bug？
    因為舊測試都停在 bug 前一步，只驗粗的結果：
    - 分頁只驗 `TotalCount` / `TotalPages`，數字對就過——但 bug 是「內容位移」，總數根本不受影響。
@@ -72,18 +63,18 @@ Claude Code（VS Code 擴充），Opus 4.8。
 
 練習 3
 
-1. [x] `/Products/LowStock` 不帶參數 → 門檻 10（5 筆）；帶 `?threshold=3` → 縮到 1 筆
-2. [x] `?threshold=0`、`?threshold=-1` → 顯示「庫存門檻必須大於 0」，HTTP 200 不是 500
-3. [x] 近 30 天售出排除了 Cancelled（service 測試：近期 Confirmed 5 計入、近期 Cancelled 4 排除、40 天前 7 排除 → 得 5）
-4. [x] 停售商品不出現（測試 + 頁面都確認過）
-5. [x] 分層與命名沿用既有 Products 慣例（Controller 薄、邏輯在 service、EF 查詢在 repository、ViewModel 綁定、ModelState 驗證）
-6. [x] 新增 3 個 service 測試，`dotnet test` 全綠
+1. ✅ `/Products/LowStock` 不帶參數 → 門檻 10（5 筆）；帶 `?threshold=3` → 縮到 1 筆
+2. ✅ `?threshold=0`、`?threshold=-1` → 顯示「庫存門檻必須大於 0」，HTTP 200 不是 500
+3. ✅ 近 30 天售出排除了 Cancelled（service 測試：近期 Confirmed 5 計入、近期 Cancelled 4 排除、40 天前 7 排除 → 得 5）
+4. ✅ 停售商品不出現（測試 + 頁面都確認過）
+5. ✅ 分層與命名沿用既有 Products 慣例（Controller 薄、邏輯在 service、EF 查詢在 repository、ViewModel 綁定、ModelState 驗證）
+6. ✅ 新增 3 個 service 測試，`dotnet test` 全綠
 
 練習 4
 
-1. [x] 重構後 `dotnet test` 全綠（沒動任何測試，35 個維持全綠）
+1. ✅ 重構後 `dotnet test` 全綠（沒動任何測試，35 個維持全綠）
 2. 改善了什麼、沒改變什麼：把 `CreateOrderAsync` 的驗證抽成 `ValidateOrderRequest` 和 `ValidateLine` 兩個方法，主體只剩「查資料 → 驗證 → 組裝 → 存檔」骨架；檢查順序、錯誤訊息、存檔時機通通沒變。
-3. [x] 我有從 code review 的角度看過 diff（只動 `OrderService.cs`，+40 −20，測試零改動）
+3. ✅ 我有從 code review 的角度看過 diff（只動 `OrderService.cs`，+40 −20，測試零改動）
 
 ---
 
