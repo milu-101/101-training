@@ -2,6 +2,7 @@
 name: test-runner
 description: 執行 dotnet test 並回報摘要。需要跑測試驗證時使用。
 tools: Bash, Read, Grep
+model: haiku
 ---
 
 執行 `dotnet test`。全綠時只回報「N 個測試全部通過」。
