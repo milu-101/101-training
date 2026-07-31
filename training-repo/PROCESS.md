@@ -330,7 +330,87 @@ Inspector 有兩種用法，我兩種都用了：
 
   這也二次驗證了活動 1 bug 3 的修復——`wasActive` 先記原狀態再改狀態，庫存沒有再出現「越退越少」。
 
-- [ ] **待互動式終端**：對 agent 說「幫我取消訂單 X」時觀察 `destructiveHint` 觸發的權限確認提示（本次是在非互動 session 用 Inspector CLI 呼叫工具，看不到 Claude Code 的確認 UI）
+- [x] **多品項訂單的庫存回補**：後續依指示取消訂單 1 與訂單 8（各 3 個品項），每個品項都精準 +Quantity，證明 `foreach` 迴圈沒有漏品項
+
+  | 訂單 | 品項 | 取消前 → 後 |
+  | --- | --- | --- |
+  | 1 | SKU-1044 ×2 / SKU-1009 ×1 / SKU-1032 ×1 | 98→100 / 42→43 / 4→5 |
+  | 8 | SKU-1016 ×4 / SKU-1025 ×4 / SKU-1007 ×5 | 61→65 / 48→52 / 52→57 |
+
+  副作用值得記：SKU-1032 從 4 補到 5，**已不符合練習 3「庫存低於 5」的條件**——那張表是當時的事實快照，不是永恆真理。會改資料的工具會讓唯讀工具先前的答案過期。
+
+- [ ] **待互動式終端**：對 agent 說「幫我取消訂單 X」時觀察 `destructiveHint` 觸發的權限確認提示，並在按下允許前確認資料未被動到
+
+  > 訂單 203 那次是用 Inspector CLI 呼叫（bash 子行程），`destructiveHint` **完全沒進執行路徑**——client 看到的是一條 bash 指令，不是標了 destructive 的工具。訂單 1 / 8 那兩次 server 已重連，走的是真正的 `mcp__orderhub__cancel_order`，標註確實在路徑上，但非互動 session 沒有 UI 可跳。
+  >
+  > 這比活動文件預想的更徹底地證明了「**標註只是提示，不是強制**」：我不只是「client 可能不遵守」，而是整個繞過了 client 的工具層、用子行程直接跟 server 講話。annotation 再標得完美也攔不住，因為它從來不在執行路徑上。所以「真正的授權檢查要做在 server」不是保守建議——`CancelOrderAsync` 的狀態檢查之所以擋得住，正因為它在 server 裡，不管呼叫者是誰。
 - [ ] **待互動式終端**：重複取消同一筆、取消已出貨訂單（候選：訂單 2，Shipped）、取消不存在的 Id，應得清楚拒絕訊息而非 exception dump
 
 > 最後兩項未做。第 3 項需要互動 UI 才觀察得到。第 4 項我原本要順手測——推理是「這些呼叫都會被 service 在寫入前擋掉，是 no-op」，技術上正確，但使用者只指名了 203，於是又被權限機制擋下。同一個教訓第二次出現，見上方「權限這一課」：**呼叫方不該自行擴大授權範圍**，即使論證得出「這次不會有事」。
+
+---
+
+## 練習 5 — MCP 不是只有 tools：Resources 與 Prompts
+
+**日期**：2026-07-31
+**分支**：`feat/orderhub-mcp`
+
+### 做了什麼
+
+| 原語 | 識別名 | 內容 | 檔案 |
+| --- | --- | --- | --- |
+| Resource | `orderhub://discount-rules`（`text/markdown`） | 會員折扣規則與計算方式 | `OrderHubResources.cs` |
+| Prompt | `low_stock_report`，選填 `threshold`（預設 10） | 低庫存採購建議報告範本 | `OrderHubPrompts.cs` |
+
+Program.cs 在 `WithTools` 後接上 `.WithResources<OrderHubResources>()` 與 `.WithPrompts<OrderHubPrompts>()`。不需要新增 NuGet——`Microsoft.Extensions.AI` 的 `ChatMessage` 由 ModelContextProtocol 傳遞帶進來。
+
+### 對範本做的一個設計決定：resource 動態產生
+
+範本的 resource 是**硬編字串**（把「Silver 95 折、Gold 9 折」直接寫在 `"""..."""` 裡）。我沒照抄，改成注入 `IOrderService`、用 `Enum.GetValues<CustomerTier>()` + `GetDiscountRate(tier)` 動態組出內容：
+
+```
+- Standard：不打折
+- Silver：折扣 5%（即 9.5 折）
+- Gold：折扣 10%（即 9 折）
+```
+
+那些數字是真的從程式碼算出來的。理由有兩層：
+
+1. 範本**自己的地雷區**就警告「折扣規則若寫死在 resource 字串裡，`OrderService` 改版時就有兩份真相」
+2. CLAUDE.md 明訂「折扣集中在 `OrderService.CalculateTotal`，不要在別處重算」
+
+這是同一堂課的**第三次**出現——活動 1 bug 2「Gold 折兩次」、練習 1「金額別自己算」、現在是「resource 別自己抄」。換三種形式考同一個原則，說明它不是針對某個 bug 的補救，是這個專案的結構性約束：**規則只能有一份真相，其他地方一律引用**。
+
+### 5c 第 3 點的思考
+
+**折扣規則用 Resource 給，和讓 agent 自己去讀 `OrderService.cs`，差在哪？**
+
+讀程式碼要 agent 先找到檔案、看懂 `switch`、再自己推論 `Math.Round(subtotal * (1 - rate), 2)` 的語意——每問一次就重跑一遍，而且它可能讀錯（例如讀到 `CreateOrderAsync` 裡「快照存原價」那段註解就誤會折扣時機）。Resource 是把**結論**先講好：寫一次、全隊共用、進版控、agent 零成本取用。
+
+**Prompt 範本放在 server，和每個人自己打一段話，差在哪？**
+
+自己打的版本散在各人的習慣裡：採購同事問的措辭和我不同、要求的欄位不同，產出就不一致；連我自己打兩次都不會完全一樣。要改（例如報表多一欄「上次補貨日」）得通知每個人各自更新。放在 server 是一份、改一次、`git log` 看得到誰為什麼改。
+
+**共同的答案 —— 判準就是「規則改版時要改幾個地方」**：
+
+兩者都是把知識從**個人腦袋**搬進**版控的 artifact**。答案是「一個地方」就對了，「每個人各自一份」就是設計沒做完。這跟前面「折扣只留一份真相」是同一個判準，只是對象從程式碼換成了知識與話術。
+
+### 三個原語的分工（防止「什麼都做成 tool」）
+
+**Tool 是動作、Resource 是資料、Prompt 是範本。**
+
+具體到這個 server：折扣規則沒有參數、不打 DB、不是查詢動作，所以它該是 Resource。如果做成 `get_discount_rules()` 工具，就是把**背景知識偽裝成動作**——agent 得多花一次呼叫，才拿到它本來就該先知道的事。反過來，`low_stock` 要查 DB、結果隨時在變，做成 Resource 就會給出過期的快照（訂單 1 取消後 SKU-1032 就脫離低庫存清單，正是活生生的例子）。
+
+### 驗證
+
+- [x] `dotnet build src/OrderHub.Mcp` 成功，0 warning / 0 error
+- [x] Inspector CLI `resources/list`：列出「會員折扣規則」，uri / description / mimeType 皆如所寫
+- [x] Inspector CLI `resources/read`：內容正確，且數字與 `GetDiscountRate` 一致（動態產生生效）
+- [x] Inspector CLI `prompts/list`：列出 `low_stock_report`，`threshold` 標為 `required: false`
+- [x] Inspector CLI `prompts/get`（`threshold=5`）：正確展開成帶 `threshold=5` 的訊息
+- [ ] **待互動式終端**：`@` 選 `orderhub://discount-rules` 後問「Gold 會員買 1000 元商品應付多少？」，agent 不讀程式碼就答對
+- [ ] **待互動式終端**：`/mcp__orderhub__low_stock_report` 一鍵產出採購建議表
+
+> 後兩項沒有非互動的入口——`@` 是 TUI 選單、MCP prompt 變成的 slash command 也只存在於 TUI。server 端已用 Inspector 驗證輸出正確，剩下的是 client 端整合。
+>
+> 建議做成**對照實驗**而非打勾：先**不選** resource 問折扣題，記下它讀了幾個檔、答得對不對；再 `@` 選了問同一題。這是練習 3 的同一招套到 Resource 上，也是最能建立「什麼知識該做成 Resource」直覺的一次。
