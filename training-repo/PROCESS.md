@@ -222,19 +222,33 @@ Inspector 有兩種用法，我兩種都用了：
 
 ### 對照實驗：「哪些商品庫存低於 5？」
 
-這次是在**非互動 session** 裡做的，有個誠實的前提要先寫下來：**orderhub 的工具沒有載入這個 session**（server 是這次才建的），我也沒辦法在對話中途重啟自己的 MCP 連線去切 on/off。所以下面「沒工具 / 有工具」兩邊，是我分別走了兩條真實路徑去比，而不是同一個 agent 在同一輪切換。真正的 `/mcp` on/off 對照留給互動式終端（見下方驗證）。
+同一個問題、同一個 session，在 MCP **On** 與 **Off** 兩種狀態下各問一次。Off 那次不是模擬——是 orderhub server 中途真的斷線，`low_stock` 從工具清單消失，我只能自己繞路。
 
-**沒工具那邊（我實際繞的路）**：手上沒有 `low_stock`，要回答只能自己去撈 DB——
+#### A. MCP On — 1 次工具呼叫
 
-1. 先找連線字串（翻 `appsettings.json`：`Server=localhost;Database=OrderHubTraining;Trusted_Connection`）
-2. 再搞懂 schema：資料表 `Products`、欄位 `StockQuantity` / `IsActive` / `Sku` / `Name`（得去讀 Domain / DbContext 才知道）
-3. 自己補上「仍在販售」的條件（`IsActive = 1`），不然會混進停售品
-4. 用 `sqlcmd` 跑 `SELECT ... WHERE StockQuantity < 5 AND IsActive = 1 ORDER BY StockQuantity`
-5. 結果還被 sqlcmd 的 codepage 弄成亂碼，SKU 和數字看得懂、中文名整排變豆腐
+1. 看工具清單，`low_stock` 的 description 寫著「列出庫存低於門檻且仍在販售的商品，依庫存量升冪排序」，參數 `threshold`（預設 10）——直接判定就是它
+2. 呼叫 `low_stock(threshold=5)`
+3. 收到已排序的乾淨 JSON，整理成表格回答
 
-**有工具那邊**：`low_stock(threshold=5)`，一次呼叫。乾淨 JSON、中文完好、`IsActive` 過濾和排序都已經包在工具裡。
+讀專案檔案 0 個、跑 shell 指令 0 條、需要的前置知識 0 項。
 
-**兩邊結果一致**（都這 5 筆）：
+#### B. MCP Off — 11 個步驟、8 條指令、4 次失敗重試
+
+| # | 做了什麼 | 結果 |
+| --- | --- | --- |
+| 1 | `ls` + Glob `**/*.csproj` 找專案位置 | 找到 `training-repo` |
+| 2 | 讀 `appsettings.json` 拿連線字串 | `localhost` / `OrderHubTraining` / Windows 驗證 |
+| 3 | 讀 `Product.cs`、`ProductRepository.cs` 搞懂業務規則 | 發現條件是 `IsActive && StockQuantity < threshold`，排序依 `StockQuantity` |
+| 4 | `which sqlcmd` 失敗，改掃 Program Files | 在 ODBC Client SDK 170 底下找到 |
+| 5 | 第一次查詢 | 有資料，但中文名稱是亂碼 |
+| 6 | 加 `-f 65001` | 還是亂碼（管線編碼） |
+| 7 | 改輸出到檔案 + `FOR JSON` | ❌ `-E` 與參數衝突 |
+| 8 | 修掉 `-h -1` 寫法 | 成功但 JSON 截斷在 256 字元 |
+| 9 | 加 `-y0` | ❌ 與 `-W` 衝突 |
+| 10 | 拿掉 `-h-1` | ❌ 與 `-y0` 衝突 |
+| 11 | 只留 `-y0 -f 65001 -o` | ✅ 完整正確的 UTF-8 結果 |
+
+#### 兩邊結果一致（都這 5 筆，皆為在售商品）
 
 | SKU | 名稱 | 庫存 |
 | --- | --- | --- |
@@ -244,15 +258,26 @@ Inspector 有兩種用法，我兩種都用了：
 | SKU-1014 | 星河 USB-C 集線器 | 4 |
 | SKU-1032 | 曜石 機械鍵盤 | 4 |
 
+> 同為庫存 4 的兩筆先後順序在兩邊不同——`OrderBy(StockQuantity)` 沒有第二排序鍵，跟練習 2 記下的 tie-breaker 觀察是同一件事。集合一致即算過。
+
 ### 差異記下來
 
-- **繞的路差很多**：沒工具要「連線字串 → schema 考古 → 自己補業務條件 → 寫 SQL → 還要處理編碼」，每一步都是可能出錯或問錯的地方（例如忘了 `IsActive`，就會把停售品也報成低庫存）。有工具就是一句話、一次呼叫。
-- **業務規則的歸屬**：`IsActive` 這種「什麼叫『仍在販售』」的判斷，沒工具時落在**呼叫者**身上（每個要查的人都得自己記得），有工具時它被收進 server 一次、大家共用同一份定義。這跟前面「金額別自己算」是同一堂課。
-- **輸出形狀**：DB 給的是要再解析的表格（還可能亂碼），工具給的是 agent 能直接往下用的結構化 JSON。省掉的不只是打字，是「把原始資料整理成能用的形狀」這段。
-- **一致性讓人安心**：兩條路殊途同歸回同 5 筆，反過來驗證了工具沒有偷改語意——它只是把我手動繞的那條路，收成一次可靠的呼叫。
+| 面向 | MCP Off | MCP On |
+| --- | --- | --- |
+| 工具呼叫 | 0 | 1 |
+| 讀專案檔案 | 3 | 0 |
+| shell 指令 | 8（4 次失敗重試） | 0 |
+| 前置知識 | 連線字串在哪、表名欄位、`IsActive` 這條規則 | 無 |
+| 輸出形狀 | 要處理編碼、截斷的原始表格 | 可直接往下用的結構化 JSON |
+
+- **省下的不只是步數，是「每一步都可能錯」的風險**：Off 那條路上，找 sqlcmd、湊參數、修編碼這些跟業務毫無關係的雜事吃掉了大半力氣，而每次重試都是一次可能放棄或將錯就錯的機會。
+- **最關鍵的一點——`IsActive` 是我主動去讀 repository 才發現的**。如果當時偷懶直接 `WHERE StockQuantity < 5`，這次剛好沒有停售的低庫存商品，答案會看起來一模一樣：**錯誤不會浮現，只會潛伏**。哪天有人把某個低庫存商品下架，這個查詢就開始默默給錯答案，而且沒有任何跡象。
+- **所以 MCP 真正交付的是「正確性的歸屬」**：業務規則封在 server 裡一次，agent 沒有機會漏掉；沒工具時這條規則落在**每一個呼叫者**身上，得靠人記得。這跟練習 1 的「金額別自己算」、活動 1 bug 2 的「折扣只留一份真相」是同一堂課的第三次出現。
+- **一致性反過來驗證了工具沒偷改語意**：兩條路殊途同歸回同 5 筆，說明 `low_stock` 只是把手動那條路收成一次可靠的呼叫，沒有在中間動手腳。
+- **description 就是 UX**：On 那邊我之所以一眼就選對工具、還知道結果已經排序過、已經濾掉停售品，全靠那句 description。它不是註解，它是 agent 唯一的使用說明。
 
 ### 驗證
 
 - [x] `.mcp.json` 建好、進 git（獨立 commit）
-- [x] before/after 對照完成並記錄（同一問題、兩條路、結果一致）
-- [ ] **待互動式終端**：重啟 Claude Code 讓它讀到 `.mcp.json` 後，`/mcp` 應看得到 orderhub server 與三個工具；再對同一問題問一次，觀察是否一次工具呼叫就答完（這個 session 無法自我重連，故留給互動環境確認）
+- [x] `/mcp` 看得到 orderhub server 與三個工具（On 狀態下 `low_stock` 可直接呼叫）
+- [x] before/after 對照完成並記錄（同一問題、同一 session、真實 on/off 兩種狀態，結果一致）
