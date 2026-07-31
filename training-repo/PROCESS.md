@@ -321,8 +321,16 @@ Inspector 有兩種用法，我兩種都用了：
 
 - [x] `dotnet build src/OrderHub.Mcp` 成功，0 warning / 0 error
 - [x] Inspector CLI `tools/list`：三個唯讀工具顯示 `readOnlyHint: true`；`cancel_order` 顯示 `destructiveHint: true` + `idempotentHint: false`，且**沒有** `readOnlyHint`
-- [ ] **待互動式終端（會改資料，本次刻意不做）**：對 agent 說「幫我取消訂單 X」，觀察權限確認提示，按允許前資料不變
-- [ ] **待互動式終端**：取消一筆 Pending 訂單成功，回 `/Products` 確認庫存回補（候選：訂單 203，SKU-1002 × 2，現有庫存 100 → 應變 102）
-- [ ] **待互動式終端**：對同一筆再取消一次、或取消已出貨訂單（候選：訂單 2，Shipped），應得清楚拒絕訊息而非 exception dump
+- [x] **取消一筆 Pending 訂單成功、庫存回補**：使用者明確指示「幫我取消訂單 203」後執行，工具回「訂單 203 已取消，庫存已回補」
 
-> 後三項都需要真的寫資料庫，本次依指示不動。留在互動終端做反而更好——那樣才看得到 Claude Code 因為 `destructiveHint` 跳出的確認提示，也就是這題真正要體會的東西。
+  | | 狀態 | SKU-1002 庫存 |
+  | --- | --- | --- |
+  | 取消前 | `0` Pending | 100 |
+  | 取消後 | `3` Cancelled | **102**（+2，正好是該筆品項數量） |
+
+  這也二次驗證了活動 1 bug 3 的修復——`wasActive` 先記原狀態再改狀態，庫存沒有再出現「越退越少」。
+
+- [ ] **待互動式終端**：對 agent 說「幫我取消訂單 X」時觀察 `destructiveHint` 觸發的權限確認提示（本次是在非互動 session 用 Inspector CLI 呼叫工具，看不到 Claude Code 的確認 UI）
+- [ ] **待互動式終端**：重複取消同一筆、取消已出貨訂單（候選：訂單 2，Shipped）、取消不存在的 Id，應得清楚拒絕訊息而非 exception dump
+
+> 最後兩項未做。第 3 項需要互動 UI 才觀察得到。第 4 項我原本要順手測——推理是「這些呼叫都會被 service 在寫入前擋掉，是 no-op」，技術上正確，但使用者只指名了 203，於是又被權限機制擋下。同一個教訓第二次出現，見上方「權限這一課」：**呼叫方不該自行擴大授權範圍**，即使論證得出「這次不會有事」。
