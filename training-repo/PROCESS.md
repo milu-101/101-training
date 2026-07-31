@@ -163,3 +163,35 @@ subagents / skills：
 - [x] 一個獨立 commit（訊息列出新增的三個工具）
 
 > MCP Inspector 的手動測試留到練習 2。
+
+---
+
+## 練習 2 — 用 MCP Inspector 除錯
+
+**日期**：2026-07-31
+**分支**：`feat/orderhub-mcp`
+
+### 怎麼跑的
+
+Inspector 有兩種用法，我兩種都用了：
+
+- **CLI 模式**（`npx @modelcontextprotocol/inspector --cli dotnet <dll> --method ...`）：非互動、輸出可直接抓回來核對，拿來做三項驗證最乾脆。
+- **GUI 模式**（`npx @modelcontextprotocol/inspector dotnet <dll>`）：起在 `http://localhost:6274`，我用 Playwright 開它、連上 server、切到 Tools 分頁截圖，兌現「瀏覽器會開啟 Inspector 介面」那段體驗。截圖存為 `inspector-tools-list.png`。
+
+### 三項驗證的結果
+
+1. **工具列得出來、說明如我所寫**：`tools/list` 回三個工具，snake_case 名稱（`get_order` / `low_stock` / `customer_orders`）、description、每個參數的說明和 `low_stock` 的 `default: 10` 都在。中文沒有亂碼。
+2. **`low_stock`（threshold=10）和 `/Products/LowStock` 頁面一致**：工具回 5 筆——SKU-1048(2)、SKU-1005(3)、SKU-1023(3)、SKU-1014(4)、SKU-1032(4)；頁面（門檻同樣填 10）顯示的就是這 5 個 SKU、同樣的庫存量。集合完全對得上。
+   - 小觀察：庫存同為 4 的兩筆（SKU-1014 / SKU-1032），工具和頁面的先後不同。因為 `OrderBy(StockQuantity)` 是穩定排序但同鍵沒有第二排序鍵，次序由查詢來源決定——集合一致就算過，但如果哪天要「可重現的排序」，得再加一個 tie-breaker（例如 SKU）。
+3. **不存在的 Id 回乾淨訊息**：`get_order(id=999999)` 回「找不到訂單 999999」，不是 exception dump——因為工具在 `GetOrderAsync` 回 null 時就先攔下來了。順手用 `get_order(id=203)` 對練習 0 那筆做健全性檢查，Total 4176.00（Gold 9 折）跟當時截圖一致，等於把整條分層端到端也驗過。
+
+### 心得
+
+- **CLI 模式是這種「要留證據」的驗證最好的朋友**：GUI 適合探索、看得到參數表單，但要把「我驗過、結果是這樣」寫進紀錄，CLI 的純文字輸出直接複製就好，不用截圖再讀一次。
+- **先用 Inspector 測、不要急著接 agent**：這一步把「工具能不能跑、回傳長怎樣、錯誤訊息乾不乾淨」全部確認完，之後接進 agent 出問題時，就能排除「是工具本身壞了」這條線。
+
+### 驗證
+
+- [x] 三個工具都列得出來，description、參數說明如我所寫（CLI + GUI 截圖各一份佐證）
+- [x] `low_stock(threshold=10)` 回傳商品與 `/Products/LowStock` 頁面一致
+- [x] `get_order` 用不存在的 Id 得到清楚錯誤訊息，非 exception dump
