@@ -307,7 +307,11 @@ Inspector 有兩種用法，我兩種都用了：
 **1. 建置被自己的 server 檔住**
 `dotnet build src/OrderHub.Mcp` 失敗，MSB3027/MSB3021：兩個 `OrderHub.Mcp.dll` 的 .NET Host 程序（PID 2508、35864，練習 3 `dotnet run` 起來的）還握著 DLL 不放。這是 stdio MCP server 的常態陷阱——**server 是個活著的長駐程序，改完程式要先讓它停掉才能重建**，不像一般 library 改了就 build。
 
-繞法：`dotnet build -o <暫存目錄>` 輸出到別的位置，繞過鎖驗證編譯（0 warning / 0 error），後續 Inspector 也直接跑那份暫存建置。真正要清掉鎖得終止那兩個程序，但**那不是我起的程序，我沒有擅自砍**（見下方「權限這一課」）。
+當下的繞法：`dotnet build -o <暫存目錄>` 輸出到別的位置，繞過鎖先驗證編譯過得了（0 warning / 0 error），後續 Inspector 也直接跑那份暫存建置。
+
+真正要清掉鎖得終止那兩個程序，但**那不是我起的程序，我沒有擅自砍**（試了一次就被權限機制擋下，見下方「權限這一課」）。後來使用者明確指示停掉 PID 2508、35864，停掉之後 `dotnet build src/OrderHub.Mcp` 走正常輸出路徑就成功了。
+
+> 教訓：改完 MCP server 的程式碼，**先停 server 再建置**，別急著繞。`-o 暫存目錄` 是驗證編譯的好工具，但它不會解決鎖，只是讓你看得到編譯結果。
 
 **2. `[McpServerTool]` 的預設值會反咬**
 `Destructive` 預設 `true`、`ReadOnly` 預設 `false`。所以練習 1 那三個「懶得標」的唯讀工具，等於一直在向 client 宣告「我可能有破壞性」——client 可能因此每次查訂單都跳確認。標註不是裝飾，是它決定 client 要不要煞車。
@@ -325,7 +329,7 @@ Inspector 有兩種用法，我兩種都用了：
 
 ### 驗證
 
-- [x] 編譯通過（0 warning / 0 error；因 DLL 被 server 鎖住，改用 `-o` 輸出到暫存目錄驗證）
+- [x] `dotnet build src/OrderHub.Mcp` 成功，0 warning / 0 error（停掉佔用中的 server 程序後走正常輸出路徑；過程見上方「踩到的兩件事」）
 - [x] Inspector CLI `tools/list`：三個唯讀工具顯示 `readOnlyHint: true`；`cancel_order` 顯示 `destructiveHint: true` + `idempotentHint: false`，且**沒有** `readOnlyHint`
 - [ ] **待互動式終端（會改資料，本次刻意不做）**：對 agent 說「幫我取消訂單 X」，觀察權限確認提示，按允許前資料不變
 - [ ] **待互動式終端**：取消一筆 Pending 訂單成功，回 `/Products` 確認庫存回補（候選：訂單 203，SKU-1002 × 2，現有庫存 100 → 應變 102）
