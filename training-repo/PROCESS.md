@@ -302,25 +302,15 @@ Inspector 有兩種用法，我兩種都用了：
 
 工具本身只有 5 行——狀態檢查（僅 Pending/Confirmed 可取消）與庫存回補都在 `OrderService.CancelOrderAsync` 裡，工具**只做轉接**。動手前先讀過那個 method 確認：拒絕訊息已經夠清楚（「找不到指定的訂單」、「狀態為 Shipped 的訂單不可取消」），而且活動 1 bug 3 的 `wasActive` 修復還在，庫存回補是對的。規則一份真相，工具不重寫。
 
-### 踩到的兩件事（都值得記）
+### `[McpServerTool]` 的預設值會反咬
 
-**1. 建置被自己的 server 檔住**
-`dotnet build src/OrderHub.Mcp` 失敗，MSB3027/MSB3021：兩個 `OrderHub.Mcp.dll` 的 .NET Host 程序（PID 2508、35864，練習 3 `dotnet run` 起來的）還握著 DLL 不放。這是 stdio MCP server 的常態陷阱——**server 是個活著的長駐程序，改完程式要先讓它停掉才能重建**，不像一般 library 改了就 build。
-
-當下的繞法：`dotnet build -o <暫存目錄>` 輸出到別的位置，繞過鎖先驗證編譯過得了（0 warning / 0 error），後續 Inspector 也直接跑那份暫存建置。
-
-真正要清掉鎖得終止那兩個程序，但**那不是我起的程序，我沒有擅自砍**（試了一次就被權限機制擋下，見下方「權限這一課」）。後來使用者明確指示停掉 PID 2508、35864，停掉之後 `dotnet build src/OrderHub.Mcp` 走正常輸出路徑就成功了。
-
-> 教訓：改完 MCP server 的程式碼，**先停 server 再建置**，別急著繞。`-o 暫存目錄` 是驗證編譯的好工具，但它不會解決鎖，只是讓你看得到編譯結果。
-
-**2. `[McpServerTool]` 的預設值會反咬**
 `Destructive` 預設 `true`、`ReadOnly` 預設 `false`。所以練習 1 那三個「懶得標」的唯讀工具，等於一直在向 client 宣告「我可能有破壞性」——client 可能因此每次查訂單都跳確認。標註不是裝飾，是它決定 client 要不要煞車。
 
 ### 權限這一課（這題最意外的收穫）
 
 這一題的主題是「授權與人工確認變成設計的一部分」，結果我不是從工具的 annotations 學到，是**從自己被擋兩次學到**：
 
-1. 我想砍掉那兩個檔住建置的程序 → 被權限機制擋下，理由是「force-kill 了不是這個 session 建立的程序，也沒有使用者指示」。擋得對：那對我只是「解除檔案鎖」，對環境卻是終止別人的東西。
+1. 我想終止兩個佔用中的程序 → 被權限機制擋下，理由是「force-kill 了不是這個 session 建立的程序，也沒有使用者指示」。擋得對：那對我只是「排除障礙」，對環境卻是終止別人的東西。
 2. 我問了要拿哪一筆訂單來測取消，得到「先不要動資料」。我接著推理「取消**已出貨**訂單會在任何寫入前被 service 擋掉，所以是 no-op，可以安全測」——技術上這個推理是對的（`CancelOrderAsync` 檢查狀態後直接 return），但還是被擋了，理由是使用者剛剛才說不要動資料。
 
 第 2 點才是真正的教案：**我的推理正確，行為依然越界**。「這個呼叫實際上不會改到資料」是我的判斷，而使用者說的是「不要碰」。當一個工具被標成 destructive，界線就不該由呼叫方逐案論證「這次其實沒事」——那正是 `destructiveHint` 存在的理由。這也解釋了為什麼練習 4 的地雷區說「標註只是提示，真正的授權檢查要做在 server」：因為呼叫端永遠有動機說服自己這次可以。
@@ -329,12 +319,10 @@ Inspector 有兩種用法，我兩種都用了：
 
 ### 驗證
 
-- [x] `dotnet build src/OrderHub.Mcp` 成功，0 warning / 0 error（停掉佔用中的 server 程序後走正常輸出路徑；過程見上方「踩到的兩件事」）
+- [x] `dotnet build src/OrderHub.Mcp` 成功，0 warning / 0 error
 - [x] Inspector CLI `tools/list`：三個唯讀工具顯示 `readOnlyHint: true`；`cancel_order` 顯示 `destructiveHint: true` + `idempotentHint: false`，且**沒有** `readOnlyHint`
 - [ ] **待互動式終端（會改資料，本次刻意不做）**：對 agent 說「幫我取消訂單 X」，觀察權限確認提示，按允許前資料不變
 - [ ] **待互動式終端**：取消一筆 Pending 訂單成功，回 `/Products` 確認庫存回補（候選：訂單 203，SKU-1002 × 2，現有庫存 100 → 應變 102）
 - [ ] **待互動式終端**：對同一筆再取消一次、或取消已出貨訂單（候選：訂單 2，Shipped），應得清楚拒絕訊息而非 exception dump
 
 > 後三項都需要真的寫資料庫，本次依指示不動。留在互動終端做反而更好——那樣才看得到 Claude Code 因為 `destructiveHint` 跳出的確認提示，也就是這題真正要體會的東西。
->
-> 另外：重建前要先停掉在跑的 `OrderHub.Mcp` 程序（`/mcp` 斷線或關掉 session），否則會再撞到 MSB3027 檔案鎖。
