@@ -195,3 +195,64 @@ Inspector 有兩種用法，我兩種都用了：
 - [x] 三個工具都列得出來，description、參數說明如我所寫（CLI + GUI 截圖各一份佐證）
 - [x] `low_stock(threshold=10)` 回傳商品與 `/Products/LowStock` 頁面一致
 - [x] `get_order` 用不存在的 Id 得到清楚錯誤訊息，非 exception dump
+
+---
+
+## 練習 3 — 註冊給 agent，做 before/after 對照
+
+**日期**：2026-07-31
+**分支**：`feat/orderhub-mcp`
+
+### 註冊
+
+在 repo 根目錄建了 `.mcp.json`（進 git，全隊共用）：
+
+```json
+{
+  "mcpServers": {
+    "orderhub": {
+      "command": "dotnet",
+      "args": ["run", "--project", "src/OrderHub.Mcp"]
+    }
+  }
+}
+```
+
+> `dotnet run` 首次要編譯、較慢，agent 連線可能逾時。真的遇到就先 `dotnet build` 一次，或把 `args` 改指向發佈後的執行檔。
+
+### 對照實驗：「哪些商品庫存低於 5？」
+
+這次是在**非互動 session** 裡做的，有個誠實的前提要先寫下來：**orderhub 的工具沒有載入這個 session**（server 是這次才建的），我也沒辦法在對話中途重啟自己的 MCP 連線去切 on/off。所以下面「沒工具 / 有工具」兩邊，是我分別走了兩條真實路徑去比，而不是同一個 agent 在同一輪切換。真正的 `/mcp` on/off 對照留給互動式終端（見下方驗證）。
+
+**沒工具那邊（我實際繞的路）**：手上沒有 `low_stock`，要回答只能自己去撈 DB——
+
+1. 先找連線字串（翻 `appsettings.json`：`Server=localhost;Database=OrderHubTraining;Trusted_Connection`）
+2. 再搞懂 schema：資料表 `Products`、欄位 `StockQuantity` / `IsActive` / `Sku` / `Name`（得去讀 Domain / DbContext 才知道）
+3. 自己補上「仍在販售」的條件（`IsActive = 1`），不然會混進停售品
+4. 用 `sqlcmd` 跑 `SELECT ... WHERE StockQuantity < 5 AND IsActive = 1 ORDER BY StockQuantity`
+5. 結果還被 sqlcmd 的 codepage 弄成亂碼，SKU 和數字看得懂、中文名整排變豆腐
+
+**有工具那邊**：`low_stock(threshold=5)`，一次呼叫。乾淨 JSON、中文完好、`IsActive` 過濾和排序都已經包在工具裡。
+
+**兩邊結果一致**（都這 5 筆）：
+
+| SKU | 名稱 | 庫存 |
+| --- | --- | --- |
+| SKU-1048 | 晨光 行動電源 | 2 |
+| SKU-1005 | 極光 筆電支架 | 3 |
+| SKU-1023 | 雲峰 27吋螢幕 | 3 |
+| SKU-1014 | 星河 USB-C 集線器 | 4 |
+| SKU-1032 | 曜石 機械鍵盤 | 4 |
+
+### 差異記下來
+
+- **繞的路差很多**：沒工具要「連線字串 → schema 考古 → 自己補業務條件 → 寫 SQL → 還要處理編碼」，每一步都是可能出錯或問錯的地方（例如忘了 `IsActive`，就會把停售品也報成低庫存）。有工具就是一句話、一次呼叫。
+- **業務規則的歸屬**：`IsActive` 這種「什麼叫『仍在販售』」的判斷，沒工具時落在**呼叫者**身上（每個要查的人都得自己記得），有工具時它被收進 server 一次、大家共用同一份定義。這跟前面「金額別自己算」是同一堂課。
+- **輸出形狀**：DB 給的是要再解析的表格（還可能亂碼），工具給的是 agent 能直接往下用的結構化 JSON。省掉的不只是打字，是「把原始資料整理成能用的形狀」這段。
+- **一致性讓人安心**：兩條路殊途同歸回同 5 筆，反過來驗證了工具沒有偷改語意——它只是把我手動繞的那條路，收成一次可靠的呼叫。
+
+### 驗證
+
+- [x] `.mcp.json` 建好、進 git（獨立 commit）
+- [x] before/after 對照完成並記錄（同一問題、兩條路、結果一致）
+- [ ] **待互動式終端**：重啟 Claude Code 讓它讀到 `.mcp.json` 後，`/mcp` 應看得到 orderhub server 與三個工具；再對同一問題問一次，觀察是否一次工具呼叫就答完（這個 session 無法自我重連，故留給互動環境確認）
