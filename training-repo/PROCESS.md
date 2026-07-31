@@ -120,3 +120,46 @@ subagents / skills：
 
 - Playwright MCP 已接上，建單 → 截圖整條流程 agent 能獨立完成。
 - 結果截圖存為 `order-203-result.png`。
+
+---
+
+## 練習 1 — 自建 OrderHub MCP Server（stdio）
+
+**日期**：2026-07-31
+**分支**：`feat/orderhub-mcp`
+
+### 做了什麼
+
+建了一個 C# console 專案 `src/OrderHub.Mcp`，透過 stdio 對外開三個唯讀工具：
+
+| 工具（agent 看到的名字） | 做什麼 | 底層接誰 |
+| --- | --- | --- |
+| `get_order` | 依訂單編號查明細（客戶、品項、單價快照、折扣、應付總額） | `IOrderService.GetOrderAsync` + 金額計算 |
+| `low_stock` | 列出庫存低於門檻、仍在販售的商品，庫存升冪 | `IProductRepository.GetActiveAsync` |
+| `customer_orders` | 查某客戶的全部訂單摘要 | `IOrderService.GetCustomerOrdersAsync` |
+
+方法名 `GetOrder` / `LowStock` / `CustomerOrders` 由 SDK 自動轉成 snake_case，煙霧測試時確認過就是這三個名字。
+
+### 動手前先對過的事（延續練習 2 那句「產出要自己驗」）
+
+範本引用了一票 `IOrderService` 方法，我沒照抄就寫，先開介面確認簽章對得上：
+
+- `IOrderService` 確實有 `GetOrderAsync` / `GetCustomerOrdersAsync` / `CalculateSubtotal` / `CalculateTotal` / `GetDiscountRate` ✅
+- `IProductRepository.GetActiveAsync()` 回 `Product` 清單，欄位有 `Sku` / `Name` / `StockQuantity` ✅
+- `OrderService` 建構子吃三個 repository（Order / Product / Customer），所以 DI 這三個都要註冊，少一個執行期才會炸 ✅
+- 連線字串 key 是 `Default`，跟 Web 的 appsettings 一致；MCP 專案沒有 appsettings，靠範本裡的 fallback 撐 ✅
+
+### 踩到 / 注意到的點
+
+- **`dotnet new console` 預設給 net10.0**（機器裝了 SDK 10），手動改回 `net8.0` 跟其他專案一致。
+- **少 `using Microsoft.Extensions.Configuration;` 會編不過**：`GetConnectionString` 是那個命名空間的擴充方法，第一次 build 就吃了 CS1501，補上就好。
+- **分層照舊**：工具建構子注入的是 service / repository，沒有直接摸 `DbContext`；金額一律叫 `OrderService` 算，工具裡不重寫折扣規則（跟 CLAUDE.md 和練習 2 bug 2 同一條原則——規則只留一份真相）。
+- **stdout 是協定通道**：log 全部導到 stderr（`LogToStandardErrorThreshold`），投影成匿名物件避免 Order↔Customer 循環參照在執行期爆掉。
+
+### 驗證
+
+- [x] `dotnet build src/OrderHub.Mcp` 成功，0 warning / 0 error
+- [x] stdio 煙霧測試：送 `initialize` + `tools/list`，stdout 乾淨地回三個工具（名稱、description、參數 schema 都對），log 走 stderr，stdin 保持開著避免 server 提早關機
+- [x] 一個獨立 commit（訊息列出新增的三個工具）
+
+> MCP Inspector 的手動測試留到練習 2。
