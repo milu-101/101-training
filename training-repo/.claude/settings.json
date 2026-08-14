@@ -6,9 +6,14 @@
       "Bash(git reset --hard *)",
       "Read(**/appsettings.Production.json)",
       "Read(**/*.pfx)",
-      "Edit(src/OrderHub.Infrastructure/Migrations/**)"
+      "Edit(src/OrderHub.Infrastructure/Migrations/**)",
+      "Read(**/UserSecrets/**)",
+      "Bash(dotnet user-secrets list*)"
     ],
-    "ask": ["Bash(dotnet ef database drop *)", "Bash(git push *)"],
+    "ask": [
+      "Bash(dotnet ef database drop *)",
+      "Bash(git push *)"
+    ],
     "allow": [
       "Bash(dotnet build *)",
       "Bash(dotnet test *)",
