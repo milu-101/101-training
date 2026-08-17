@@ -57,7 +57,7 @@
         "promptType": "define",
         "text": "=以下是近 30 天取消訂單的查詢結果 JSON(count 為筆數):{{ JSON.stringify($json) }}",
         "options": {
-          "systemMessage": "你是 OrderHub 的退單巡檢助理。只根據提供的資料寫中文日報,不要編造數字。第一行用一句話摘要(會當 issue 標題),其後列出:總筆數、總金額、值得注意的訂單(高金額或高等級會員)。count 為 0 時只回『本日無退單』。"
+          "systemMessage": "你是 OrderHub 的退單巡檢助理。只根據提供的資料寫中文日報,不要編造數字。第一行用一句話摘要(會當 issue 標題),其後列出:總筆數、總金額、值得注意的訂單(高金額或高等級會員)。count 為 0 時只回『本日無退單』。對每筆取消的訂單，先用工具查出品項明細與會員等級，日報中引用查到的實際數字。\n\n"
         }
       },
       "type": "@n8n/n8n-nodes-langchain.agent",
@@ -71,6 +71,7 @@
     },
     {
       "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
         "options": {}
       },
       "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
@@ -245,6 +246,24 @@
       ],
       "id": "c34e777f-edb0-46ea-9106-62c81b98858a",
       "name": "Insert row"
+    },
+    {
+      "parameters": {
+        "endpointUrl": "http://localhost:3001",
+        "include": "selected",
+        "includeTools": [
+          "get_order"
+        ],
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+      "typeVersion": 1.4,
+      "position": [
+        640,
+        208
+      ],
+      "id": "9e837971-7169-4f73-8831-c4db61c9253c",
+      "name": "MCP Client"
     }
   ],
   "pinData": {},
@@ -332,6 +351,17 @@
           }
         ]
       ]
+    },
+    "MCP Client": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
@@ -340,7 +370,7 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "a203bc7a-ca7d-4971-b9ab-031567421301",
+  "versionId": "1896aabb-609e-4851-86e0-ef266216eaea",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "8ae3625ec32a9e11cc5d73e2feb1c83dbed1351e8d94fd75923af947aa229840"
